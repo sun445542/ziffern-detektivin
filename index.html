@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="de">
+<head>
+<!--
+  ZIFFERN-DETEKTIVIN – Live-Demo für die Berufsvorstellung (3. Klasse)
+  =====================================================
+  So funktioniert's (Kurzanleitung für dich):
+
+  1. TRAININGSDATEN SAMMELN (zuhause, iPad + Apple Pencil):
+     - Tab "Sammeln" öffnen, Ziffer wählen (0–9), Schreiber wählen (Kind 1 / Kind 2)
+     - Jedes Kind schreibt jede Ziffer ca. 8–10×, nach jedem "Speichern" wird geleert
+     - Am Ende "Daten exportieren" → Datei z. B. in die iCloud/Dateien-App sichern
+  2. TRAINIEREN (dein Rechner, Python-Skript):
+     - Das zugehörige Skript train_demo_model.py nimmt diese JSON-Datei
+       und erzeugt ziffern_model.json
+  3. LIVE-DEMO (Klassenzimmer, offline, alles auf dem iPad):
+     - Diese HTML-Datei in Safari öffnen (Dateien-App → tippen)
+     - Tab "Erkennen" → "Modell laden" → ziffern_model.json wählen
+     - Tab "Schreiber" → eigenes "Modell laden" → schreiber_model.json (optional:
+       rät, WER die Zahl geschrieben hat – Kind 1, Kind 2, Gast)
+     - Kind schreibt mit dem Apple Pencil → "Erkennen!" → fertig 🎉
+
+  Wichtig: Das 28×28-Preprocessing hier ist identisch für Sammel- und
+  Erkenn-Modus – dadurch passt dein Training exakt zur Live-Eingabe.
+  Die Demo läuft komplett offline, ohne Server, ohne Internet.
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ziffern-Detektivin</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Rounded", system-ui, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+    padding: 12px 12px 28px;
+  }
+  header { text-align: center; padding: 4px 0 10px; }
+  header h1 {
+    margin: 0;
+    font-size: clamp(22px, 5vw, 34px);
+    background: linear-gradient(90deg, #f472b6, #a78bfa, #38bdf8);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  header p { margin: 4px 0 0; color: #94a3b8; font-size: 14px; }
+  .tabs { display: flex; justify-content: center; gap: 8px; margin: 8px 0 12px; flex-wrap: wrap; }
+  .tab {
+    border: none; border-radius: 999px; padding: 10px 22px;
+    font-size: 16px; font-weight: 600; cursor: pointer;
+    background: #1e293b; color: #94a3b8;
+  }
+  .tab.active { background: linear-gradient(90deg, #f472b6, #a78bfa); color: #fff; }
+  .layout { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .card {
+    background: #1e293b; border-radius: 20px; padding: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  }
+  .draw-card { width: min(480px, 96vw); }
+  .side-card { width: min(400px, 96vw); }
+  #draw {
+    width: 100%; aspect-ratio: 1 / 1; display: block;
+    border-radius: 14px; background: #020617;
+    touch-action: none; cursor: crosshair;
+    box-shadow: inset 0 0 0 3px #334155;
+  }
+  .btnrow { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  button.big {
+    flex: 1; min-width: 140px; border: none; border-radius: 14px;
+    padding: 14px; font-size: 18px; font-weight: 700; cursor: pointer;
+    color: #fff; background: #334155;
+  }
+  button.big.primary { background: linear-gradient(90deg, #f472b6, #a78bfa); }
+  button.big:active { transform: scale(.97); }
+  .previewbox { text-align: center; }
+  .previewbox h3, .resultbox h3 { margin: 4px 0 8px; font-size: 15px; color: #94a3b8; font-weight: 600; }
+  #preview {
+    width: 140px; height: 140px; image-rendering: pixelated;
+    border-radius: 10px; background: #020617; box-shadow: inset 0 0 0 3px #334155;
+  }
+  .result { min-height: 72px; display: flex; align-items: center; justify-content: center; gap: 14px; }
+  .bigdigit {
+    font-size: 56px; font-weight: 800; width: 84px; height: 84px; line-height: 84px;
+    border-radius: 50%; text-align: center; color: #fff;
+    background: linear-gradient(135deg, #38bdf8, #a78bfa);
+    display: none;
+  }
+  .resulttext { font-size: 17px; color: #e2e8f0; }
+  .bars { margin-top: 6px; }
+  .barrow { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .barlabel { width: 18px; font-weight: 700; color: #94a3b8; }
+  .bartrack { flex: 1; height: 14px; background: #0f172a; border-radius: 7px; overflow: hidden; }
+  .barfill { height: 100%; width: 0%; background: #64748b; border-radius: 7px; transition: width .25s; }
+  .barfill.top { background: linear-gradient(90deg, #34d399, #38bdf8); }
+  .barpct { width: 52px; font-size: 13px; color: #94a3b8; text-align: right; }
+  .status {
+    margin-top: 10px; text-align: center; font-size: 13px; color: #94a3b8;
+    padding: 8px 10px; background: #0f172a; border-radius: 10px;
+  }
+  .labels { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; margin: 6px 0 10px; }
+  .labels button {
+    border: none; border-radius: 10px; padding: 10px 0; font-size: 18px; font-weight: 700;
+    background: #0f172a; color: #e2e8f0; cursor: pointer;
+  }
+  .labels button.sel { background: #f472b6; color: #fff; }
+  .writers { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .writers button {
+    border: none; border-radius: 999px; padding: 8px 16px; font-size: 14px; font-weight: 600;
+    background: #0f172a; color: #e2e8f0; cursor: pointer;
+  }
+  .writers button.sel { background: #38bdf8; color: #0f172a; }
+  .collectinfo { font-size: 13px; color: #94a3b8; margin-top: 10px; line-height: 1.5; }
+  .hidden { display: none; }
+  input[type="file"] { display: none; }
+  /* ---------- Intro-Folien ---------- */
+  #intro { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; }
+  .slide { display: none; flex: 1; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 16px; overflow-y: auto; }
+  .slide.active { display: flex; }
+  .bg-a { background: radial-gradient(900px 600px at 20% 0%, #312e81 0%, #0b1020 70%); }
+  .bg-b { background: radial-gradient(900px 600px at 80% 0%, #831843 0%, #0b1020 70%); }
+  .bg-c { background: radial-gradient(900px 600px at 50% 0%, #164e63 0%, #0b1020 70%); }
+  .slide .bigemoji { font-size: clamp(64px, 18vw, 120px); }
+  .slide h2 { margin: 0; font-size: clamp(24px, 6vw, 40px); }
+  .slide p { margin: 0; font-size: clamp(16px, 4vw, 22px); color: #cbd5e1; max-width: 680px; }
+  .steps { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .step { background: rgba(30, 41, 59, .8); border-radius: 16px; padding: 14px 18px; font-size: clamp(15px, 3.5vw, 19px); font-weight: 600; }
+  .intro-nav { display: flex; gap: 10px; justify-content: center; padding: 0 16px 20px; }
+  .intro-nav button { border: none; border-radius: 12px; padding: 12px 24px; font-size: 17px; font-weight: 700; cursor: pointer; background: #334155; color: #fff; }
+  .intro-nav button.primary { background: linear-gradient(90deg, #f472b6, #a78bfa); }
+  .dots { display: flex; gap: 8px; justify-content: center; padding-bottom: 14px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #334155; }
+  .dot.on { background: #f472b6; }
+</style>
+</head>
+<body>
+
+<div id="intro">
+  <div class="slide active bg-a">
+    <div class="bigemoji">🕵️‍♀️</div>
+    <h2>Hallo, ich bin Stefanie!</h2>
+    <p>Ich bin Mathematikerin – und heute bin ich eure <b>Detektivin</b>.</p>
+  </div>
+  <div class="slide bg-b">
+    <div class="bigemoji">🤔</div>
+    <h2>Was glaubt ihr: Was mache ich den ganzen Tag?</h2>
+    <p>Rate ruhig mal! Tipp: Ich rechne <b>nicht</b> den ganzen Tag … versprochen. 😉</p>
+  </div>
+  <div class="slide bg-a">
+    <div class="bigemoji">🔎</div>
+    <h2>Ich bin Detektivin und Lehrerin – für Computer!</h2>
+    <p>Ich bringe Computern Dinge bei – wie eine Lehrerin. 🧑‍🏫<br>Und dafür suche ich Hinweise – wie eine Detektivin. 🔍</p>
+  </div>
+  <div class="slide bg-c">
+    <div class="bigemoji">🧩</div>
+    <h2>So funktioniert mein Job</h2>
+    <div class="steps">
+      <div class="step">🔍 Hinweise suchen (Daten!)</div>
+      <div class="step">🧩 Muster finden</div>
+      <div class="step">🧑‍🏫 Computer unterrichten</div>
+    </div>
+    <p>Beispiel: Woher weiß YouTube eigentlich, welche Videos dir gefallen? 🤯</p>
+  </div>
+  <div class="slide bg-a">
+    <div class="bigemoji">🚀</div>
+    <h2>Jetzt: die Prüfung!</h2>
+    <p>Mein Computer-Schüler hat ganz viel gelernt.<br>Hat er wirklich aufgepasst? Testen wir ihn – <b>live</b>!</p>
+  </div>
+  <div class="dots" id="introDots"></div>
+  <div class="intro-nav">
+    <button id="introBack">← Zurück</button>
+    <button class="primary" id="introNext">Weiter →</button>
+  </div>
+</div>
+
+<header>
+  <h1>🕵️‍♀️ Ziffern-Detektivin</h1>
+  <p>Detektivin &amp; Lehrerin für Computer · <a id="introBtn" style="color:#f472b6;cursor:pointer;text-decoration:underline">ℹ️ Über mich</a></p>
+</header>
+
+<div class="tabs">
+  <button class="tab active" id="tabErkennen" onclick="setMode('erkennen')">🔍 Erkennen</button>
+  <button class="tab" id="tabSchreiber" onclick="setMode('schreiber')">🕵️ Schreiber</button>
+  <button class="tab" id="tabSammeln" onclick="setMode('sammeln')">✏️ Sammeln</button>
+</div>
+
+<div class="layout">
+  <div class="card draw-card">
+    <canvas id="draw" width="420" height="420"></canvas>
+    <div class="btnrow">
+      <button class="big primary" id="mainBtn" onclick="mainAction()">🔍 Erkennen!</button>
+      <button class="big" onclick="clearCanvas()">🧹 Löschen</button>
+    </div>
+    <div class="status" id="modelStatus"></div>
+  </div>
+
+  <div class="card side-card">
+    <div class="previewbox">
+      <h3>👀 So sieht der Computer deine Zahl</h3>
+      <canvas id="preview" width="28" height="28"></canvas>
+    </div>
+
+    <div class="resultbox" id="resultArea">
+      <h3>🤖 Was sagt der Computer?</h3>
+      <div class="result">
+        <div class="bigdigit" id="bigDigit">7</div>
+        <div class="resulttext" id="resultText">Schreib eine Zahl und drück „Erkennen!“</div>
+      </div>
+      <div class="bars" id="bars"></div>
+    </div>
+
+    <div id="collectArea" class="hidden">
+      <h3>📚 Neue Handschrift einsammeln</h3>
+      <div class="labels" id="labels"></div>
+      <div class="writers">
+        <button class="sel" data-writer="Kind 1" onclick="pickWriter(this)">Kind 1</button>
+        <button data-writer="Kind 2" onclick="pickWriter(this)">Kind 2</button>
+        <button data-writer="Gast" onclick="pickWriter(this)">Gast</button>
+      </div>
+      <div class="collectinfo" id="collectInfo">Noch keine Bilder gespeichert.</div>
+      <div class="btnrow">
+        <button class="big" onclick="undoSample()">↩︎ Letztes zurück</button>
+        <button class="big primary" onclick="exportData()">📦 Daten exportieren</button>
+      </div>
+    </div>
+
+    <div id="writerArea" class="hidden">
+      <h3>🕵️ Wer hat das geschrieben?</h3>
+      <div class="status" id="writerModelStatus"></div>
+      <div class="result">
+        <div class="resulttext" id="writerText">Schreib eine Zahl – und ich rate, wer sie geschrieben hat!</div>
+      </div>
+      <div class="bars" id="writerBars"></div>
+    </div>
+  </div>
+</div>
+
+<div id="exportOverlay" style="display:none; position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.75); align-items:center; justify-content:center; padding:16px;">
+  <div class="card" style="width:min(560px,96vw); max-height:90vh; overflow:auto;">
+    <h3 style="margin-top:0;">📦 Daten exportieren</h3>
+    <p class="collectinfo">
+      Hat sich keine Datei heruntergeladen (z.&nbsp;B. in Koders Vorschau oder anderen eingebetteten Browsern)?
+      Dann: <b>Kopieren</b> tippen → eine neue Datei <b>handschrift-daten.json</b> anlegen → einfügen → speichern.
+    </p>
+    <textarea id="exportText" readonly style="width:100%; height:180px; background:#020617; color:#e2e8f0; border:1px solid #334155; border-radius:10px; font-size:11px; padding:8px;"></textarea>
+    <div class="btnrow">
+      <button class="big primary" onclick="copyExport()">📋 In Zwischenablage kopieren</button>
+      <button class="big" onclick="closeExportOverlay()">Fertig</button>
+    </div>
+    <div class="status" id="exportStatus">Der Download-Versuch wurde gestartet – falls nichts passierte, bitte den Text oben kopieren.</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ---------- Zeichenfläche ----------
+const S = 420;
+const draw = document.getElementById("draw");
+const dctx = draw.getContext("2d", { willReadFrequently: true });
+
+function clearCanvas() {
+  dctx.fillStyle = "#020617";
+  dctx.fillRect(0, 0, S, S);
+  dctx.lineWidth = 26;
+  dctx.lineCap = "round";
+  dctx.lineJoin = "round";
+  dctx.strokeStyle = "#ffffff";
+  dctx.fillStyle = "#ffffff";
+}
+clearCanvas();
+
+let drawing = false, lastP = null;
+
+function pos(e) {
+  const r = draw.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * S / r.width, y: (e.clientY - r.top) * S / r.height };
+}
+draw.addEventListener("pointerdown", (e) => {
+  if (e.pointerType === "mouse" && e.button !== 0) return;
+  drawing = true;
+  draw.setPointerCapture(e.pointerId);
+  lastP = pos(e);
+  dctx.beginPath();
+  dctx.arc(lastP.x, lastP.y, dctx.lineWidth / 2, 0, Math.PI * 2);
+  dctx.fill();
+});
+draw.addEventListener("pointermove", (e) => {
+  if (!drawing) return;
+  const p = pos(e);
+  dctx.beginPath();
+  dctx.moveTo(lastP.x, lastP.y);
+  dctx.lineTo(p.x, p.y);
+  dctx.stroke();
+  lastP = p;
+});
+function stopDrawing() { drawing = false; }
+draw.addEventListener("pointerup", stopDrawing);
+draw.addEventListener("pointercancel", stopDrawing);
+
+// ---------- Preprocessing: exakt MNIST-Protokoll ----------
+function getGrayscale() {
+  const img = dctx.getImageData(0, 0, S, S).data;
+  const g = new Float32Array(S * S);
+  for (let i = 0; i < S * S; i++) {
+    g[i] = (img[4 * i] + img[4 * i + 1] + img[4 * i + 2]) / 765;
+  }
+  return g;
+}
+
+function preprocess() {
+  const g = getGrayscale();
+  let minX = S, minY = S, maxX = -1, maxY = -1;
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      if (g[y * S + x] > 0.25) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null; // nichts gezeichnet
+
+  const cw = maxX - minX + 1, ch = maxY - minY + 1;
+  const off = document.createElement("canvas");
+  off.width = cw; off.height = ch;
+  off.getContext("2d").drawImage(draw, minX, minY, cw, ch, 0, 0, cw, ch);
+
+  // längste Seite auf 20 px skalieren
+  const scale = 20 / Math.max(cw, ch);
+  const tw = Math.max(1, Math.round(cw * scale));
+  const th = Math.max(1, Math.round(ch * scale));
+  const sc = document.createElement("canvas");
+  sc.width = tw; sc.height = th;
+  const sctx = sc.getContext("2d");
+  sctx.imageSmoothingEnabled = true;
+  sctx.imageSmoothingQuality = "high";
+  sctx.drawImage(off, 0, 0, cw, ch, 0, 0, tw, th);
+  const sim = sctx.getImageData(0, 0, tw, th).data;
+  const small = new Float32Array(tw * th);
+  for (let i = 0; i < tw * th; i++) {
+    small[i] = (sim[4 * i] + sim[4 * i + 1] + sim[4 * i + 2]) / 765;
+  }
+
+  // Schwerpunkt (Center of Mass) bestimmen
+  let m = 0, mx = 0, my = 0;
+  for (let y = 0; y < th; y++) {
+    for (let x = 0; x < tw; x++) {
+      const v = small[y * tw + x];
+      m += v; mx += v * x; my += v * y;
+    }
+  }
+  const comX = m > 0 ? mx / m : tw / 2;
+  const comY = m > 0 ? my / m : th / 2;
+
+  // in 28×28 einsetzen, Schwerpunkt auf Zentrum (14, 14)
+  const out = new Float32Array(784);
+  const dx = Math.round(14 - comX), dy = Math.round(14 - comY);
+  for (let y = 0; y < th; y++) {
+    const yy = y + dy;
+    if (yy < 0 || yy > 27) continue;
+    for (let x = 0; x < tw; x++) {
+      const xx = x + dx;
+      if (xx < 0 || xx > 27) continue;
+      out[yy * 28 + xx] = small[y * tw + x];
+    }
+  }
+  return out;
+}
+
+function renderPreview(px) {
+  const pv = document.getElementById("preview");
+  const pctx = pv.getContext("2d");
+  const id = pctx.createImageData(28, 28);
+  for (let i = 0; i < 784; i++) {
+    const v = Math.round(px[i] * 255);
+    id.data[4 * i] = v; id.data[4 * i + 1] = v; id.data[4 * i + 2] = v; id.data[4 * i + 3] = 255;
+  }
+  pctx.putImageData(id, 0, 0);
+}
+
+// ---------- Mini-Inferenz-Engine (reines JS, kein Framework) ----------
+// Tensor: { h, w, c, data } mit data[(y*w + x)*c + ch]
+function conv2d(t, L) {
+  const k = L.k, pad = Math.floor(k / 2);
+  const out = { h: t.h, w: t.w, c: L.filters, data: new Float32Array(t.h * t.w * L.filters) };
+  for (let oh = 0; oh < t.h; oh++) {
+    for (let ow = 0; ow < t.w; ow++) {
+      for (let oc = 0; oc < L.filters; oc++) {
+        let sum = L.b[oc];
+        for (let kh = 0; kh < k; kh++) {
+          const ih = oh + kh - pad;
+          if (ih < 0 || ih >= t.h) continue;
+          for (let kw = 0; kw < k; kw++) {
+            const iw = ow + kw - pad;
+            if (iw < 0 || iw >= t.w) continue;
+            for (let ic = 0; ic < t.c; ic++) {
+              const wIdx = ((kh * k + kw) * t.c + ic) * L.filters + oc;
+              const xIdx = (ih * t.w + iw) * t.c + ic;
+              sum += L.W[wIdx] * t.data[xIdx];
+            }
+          }
+        }
+        out.data[(oh * t.w + ow) * L.filters + oc] = Math.max(0, sum);
+      }
+    }
+  }
+  return out;
+}
+function maxpool(t) {
+  const h = Math.floor(t.h / 2), w = Math.floor(t.w / 2);
+  const out = { h, w, c: t.c, data: new Float32Array(h * w * t.c) };
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      for (let c = 0; c < t.c; c++) {
+        let m = -Infinity;
+        for (let dy = 0; dy < 2; dy++) {
+          for (let dx = 0; dx < 2; dx++) {
+            const v = t.data[((y * 2 + dy) * t.w + (x * 2 + dx)) * t.c + c];
+            if (v > m) m = v;
+          }
+        }
+        out.data[(y * w + x) * t.c + c] = m;
+      }
+    }
+  }
+  return out;
+}
+function flatten(t) {
+  const v = new Float32Array(t.h * t.w * t.c);
+  let i = 0;
+  for (let y = 0; y < t.h; y++) {
+    for (let x = 0; x < t.w; x++) {
+      for (let c = 0; c < t.c; c++) {
+        v[i++] = t.data[(y * t.w + x) * t.c + c];
+      }
+    }
+  }
+  return v;
+}
+function dense(v, L) {
+  const out = new Float32Array(L.units);
+  for (let o = 0; o < L.units; o++) {
+    let sum = L.b[o];
+    for (let i = 0; i < v.length; i++) sum += v[i] * L.W[i * L.units + o];
+    out[o] = L.activation === "relu" ? Math.max(0, sum) : sum;
+  }
+  return out;
+}
+function softmax(v) {
+  let m = -Infinity;
+  for (const x of v) if (x > m) m = x;
+  let s = 0;
+  const e = new Float32Array(v.length);
+  for (let i = 0; i < v.length; i++) { e[i] = Math.exp(v[i] - m); s += e[i]; }
+  for (let i = 0; i < v.length; i++) e[i] /= s;
+  return e;
+}
+function forward(model, input784) {
+  let t = { h: 28, w: 28, c: 1, data: input784 };
+  let v = null;
+  for (const L of model.layers) {
+    if (L.type === "conv2d") t = conv2d(t, L);
+    else if (L.type === "maxpool") t = maxpool(t);
+    else if (L.type === "flatten") v = flatten(t);
+    else if (L.type === "dense") v = dense(v, L);
+    else throw new Error("Unbekannter Layer-Typ: " + L.type);
+  }
+  return softmax(v);
+}
+
+// ---------- Platzhalter-Modell (untrainiert, nur zum UI-Testen) ----------
+function pseudoRandom(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296 * 0.2 - 0.1;
+  };
+}
+function buildLayer(type, dims) {
+  const rnd = pseudoRandom(type.length * 7919 + dims.reduce((a, b) => a * b, 1));
+  const n = dims.reduce((a, b) => a * b, 1);
+  const W = new Float32Array(n);
+  for (let i = 0; i < n; i++) W[i] = rnd();
+  const b = new Float32Array(dims[dims.length - 1]);
+  for (let i = 0; i < b.length; i++) b[i] = rnd();
+  return { W, b };
+}
+function placeholderModel() {
+  const c1 = buildLayer("conv", [3, 3, 1, 8]);
+  const c2 = buildLayer("conv2", [3, 3, 8, 16]);
+  const d1 = buildLayer("dense", [784, 32]);
+  const d2 = buildLayer("dense2", [32, 10]);
+  return {
+    name: "Platzhalter-Modell (untrainiert – nur zum Ausprobieren)",
+    layers: [
+      { type: "conv2d", k: 3, filters: 8, W: c1.W, b: c1.b },
+      { type: "maxpool" },
+      { type: "conv2d", k: 3, filters: 16, W: c2.W, b: c2.b },
+      { type: "maxpool" },
+      { type: "flatten" },
+      { type: "dense", units: 32, activation: "relu", W: d1.W, b: d1.b },
+      { type: "dense", units: 10, activation: "softmax", W: d2.W, b: d2.b }
+    ]
+  };
+}
+
+let model = placeholderModel();
+
+function updateModelStatus() {
+  document.getElementById("modelStatus").innerHTML =
+    "🤖 Modell: <b>" + model.name + "</b> &nbsp;·&nbsp; " +
+    "<label style='cursor:pointer;text-decoration:underline'>" +
+    "<input type='file' accept='.json,application/json' onchange='loadModelFile(this)'>Modell laden (ziffern_model.json)</label>" +
+    "<br>Trainiert du erst später? Dann rätst das Platzhalter-Modell nur – die Vorschau unten funktioniert trotzdem.";
+}
+updateModelStatus();
+
+function loadModelFile(input) {
+  const f = input.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const obj = JSON.parse(reader.result);
+      if (!Array.isArray(obj.layers) || obj.layers.length === 0) throw new Error("Keine Layers gefunden");
+      model = { name: obj.name || "geladenes Modell", layers: obj.layers };
+      updateModelStatus();
+      alert("Modell „" + model.name + "“ geladen! ✅");
+    } catch (err) {
+      alert("Das konnte ich nicht laden: " + err.message);
+    }
+    input.value = "";
+  };
+  reader.readAsText(f);
+}
+
+// ---------- Schreiber-Modell (wer hat die Zahl geschrieben?) ----------
+function placeholderWriterModel() {
+  const c1 = buildLayer("wconv", [3, 3, 1, 8]);
+  const c2 = buildLayer("wconv2", [3, 3, 8, 16]);
+  const d1 = buildLayer("wdense", [784, 32]);
+  const d2 = buildLayer("wdense2", [32, 2]);
+  return {
+    name: "Schreiber-Platzhalter (untrainiert – nur zum Ausprobieren)",
+    classes: ["Kind 1", "Kind 2"],
+    layers: [
+      { type: "conv2d", k: 3, filters: 8, W: c1.W, b: c1.b },
+      { type: "maxpool" },
+      { type: "conv2d", k: 3, filters: 16, W: c2.W, b: c2.b },
+      { type: "maxpool" },
+      { type: "flatten" },
+      { type: "dense", units: 32, activation: "relu", W: d1.W, b: d1.b },
+      { type: "dense", units: 2, activation: "softmax", W: d2.W, b: d2.b }
+    ]
+  };
+}
+let writerModel = placeholderWriterModel();
+let writerBars = [];
+
+function updateWriterModelStatus() {
+  document.getElementById("writerModelStatus").innerHTML =
+    "🧑‍🎓 Schreiber-Modell: <b>" + writerModel.name + "</b> &nbsp;·&nbsp; " +
+    "<label style='cursor:pointer;text-decoration:underline'>" +
+    "<input type='file' accept='.json,application/json' onchange='loadWriterModelFile(this)'>Modell laden (schreiber_model.json)</label>";
+}
+updateWriterModelStatus();
+
+function loadWriterModelFile(input) {
+  const f = input.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const obj = JSON.parse(reader.result);
+      if (!Array.isArray(obj.layers) || obj.layers.length === 0) throw new Error("Keine Layers gefunden");
+      if (!Array.isArray(obj.classes) || obj.classes.length < 2) throw new Error("Keine classes (Schreiber-Namen) gefunden");
+      writerModel = { name: obj.name || "geladenes Schreiber-Modell", classes: obj.classes, layers: obj.layers };
+      updateWriterModelStatus();
+      buildWriterBars();
+      alert("Schreiber-Modell „" + writerModel.name + "“ geladen! ✅");
+    } catch (err) {
+      alert("Das konnte ich nicht laden: " + err.message);
+    }
+    input.value = "";
+  };
+  reader.readAsText(f);
+}
+
+function buildWriterBars() {
+  const el = document.getElementById("writerBars");
+  el.innerHTML = "";
+  writerBars = [];
+  writerModel.classes.forEach((cls, i) => {
+    const row = document.createElement("div");
+    row.className = "barrow";
+    row.innerHTML =
+      "<div class='barlabel' style='width:auto;padding-right:6px'>" + cls + "</div>" +
+      "<div class='bartrack'><div class='barfill' id='wbar" + i + "'></div></div>" +
+      "<div class='barpct' id='wpct" + i + "'>0 %</div>";
+    el.appendChild(row);
+    writerBars.push(document.getElementById("wbar" + i));
+  });
+}
+buildWriterBars();
+
+function rateSchreiber() {
+  const px = preprocess();
+  if (!px) {
+    document.getElementById("writerText").textContent = "Erst eine Zahl schreiben! ✏️";
+    return;
+  }
+  renderPreview(px);
+  const probs = forward(writerModel, px);
+  let best = 0;
+  for (let i = 1; i < probs.length; i++) if (probs[i] > probs[best]) best = i;
+  const conf = probs[best];
+  for (let i = 0; i < writerBars.length; i++) {
+    writerBars[i].style.width = (probs[i] * 100).toFixed(1) + "%";
+    writerBars[i].classList.toggle("top", i === best);
+    document.getElementById("wpct" + i).textContent = (probs[i] * 100).toFixed(0) + " %";
+  }
+  const wer = writerModel.classes[best];
+  let text;
+  if (conf > 0.7) text = "Ich bin mir <b>sicher</b>: Das hat <b>" + wer + "</b> geschrieben! 🎉 (" + (conf * 100).toFixed(0) + " % sicher)";
+  else if (conf > 0.55) text = "Ich glaube, das war <b>" + wer + "</b>. (" + (conf * 100).toFixed(0) + " % sicher)";
+  else text = "Schwerer Fall! 🤔 Vielleicht <b>" + wer + "</b>? (" + (conf * 100).toFixed(0) + " % sicher)";
+  document.getElementById("writerText").innerHTML = text;
+}
+
+// ---------- UI: Modi, Balken, Ergebnis ----------
+let mode = "erkennen";
+function setMode(m) {
+  mode = m;
+  document.getElementById("tabErkennen").classList.toggle("active", m === "erkennen");
+  document.getElementById("tabSchreiber").classList.toggle("active", m === "schreiber");
+  document.getElementById("tabSammeln").classList.toggle("active", m === "sammeln");
+  document.getElementById("resultArea").classList.toggle("hidden", m !== "erkennen");
+  document.getElementById("collectArea").classList.toggle("hidden", m !== "sammeln");
+  document.getElementById("writerArea").classList.toggle("hidden", m !== "schreiber");
+  document.getElementById("mainBtn").textContent =
+    m === "erkennen" ? "🔍 Erkennen!" : m === "schreiber" ? "🕵️ Raten!" : "💾 Speichern";
+}
+function mainAction() {
+  if (mode === "erkennen") erkennen();
+  else if (mode === "schreiber") rateSchreiber();
+  else saveSample();
+}
+
+// Balken für 0–9 aufbauen
+const barsEl = document.getElementById("bars");
+const barFills = [];
+for (let d = 0; d < 10; d++) {
+  const row = document.createElement("div");
+  row.className = "barrow";
+  row.innerHTML =
+    "<div class='barlabel'>" + d + "</div>" +
+    "<div class='bartrack'><div class='barfill' id='bar" + d + "'></div></div>" +
+    "<div class='barpct' id='pct" + d + "'>0 %</div>";
+  barsEl.appendChild(row);
+  barFills.push(document.getElementById("bar" + d));
+}
+
+function erkennen() {
+  const px = preprocess();
+  if (!px) {
+    document.getElementById("resultText").textContent = "Erst eine Zahl schreiben! ✏️";
+    return;
+  }
+  renderPreview(px);
+  const probs = forward(model, px);
+  if (probs.length !== 10) {
+    document.getElementById("resultText").innerHTML =
+      "⚠️ Das geladene Modell erkennt keine Ziffern 0–9 – bitte ein Ziffern-Modell laden.";
+    return;
+  }
+  let best = 0;
+  for (let d = 1; d < 10; d++) if (probs[d] > probs[best]) best = d;
+  const conf = probs[best];
+  for (let d = 0; d < 10; d++) {
+    barFills[d].style.width = (probs[d] * 100).toFixed(1) + "%";
+    barFills[d].classList.toggle("top", d === best);
+    document.getElementById("pct" + d).textContent = (probs[d] * 100).toFixed(0) + " %";
+  }
+  const big = document.getElementById("bigDigit");
+  big.style.display = "block";
+  big.textContent = best;
+  let text;
+  if (conf > 0.7) text = "Ich bin mir <b>sicher</b>: Das ist eine <b>" + best + "</b>! 🎉 (" + (conf * 100).toFixed(0) + " % sicher)";
+  else if (conf > 0.4) text = "Ich glaube, das ist eine <b>" + best + "</b>. (" + (conf * 100).toFixed(0) + " % sicher)";
+  else text = "Hm … da bin ich mir <b>unsicher</b> 🤔 Vielleicht eine " + best + "? (" + (conf * 100).toFixed(0) + " % sicher)";
+  document.getElementById("resultText").innerHTML = text;
+}
+
+// ---------- Sammel-Modus ----------
+let currentLabel = 0;
+let currentWriter = "Kind 1";
+const samples = [];
+
+const labelsEl = document.getElementById("labels");
+for (let d = 0; d < 10; d++) {
+  const b = document.createElement("button");
+  b.textContent = d;
+  if (d === 0) b.classList.add("sel");
+  b.onclick = () => {
+    currentLabel = d;
+    labelsEl.querySelectorAll("button").forEach(x => x.classList.remove("sel"));
+    b.classList.add("sel");
+  };
+  labelsEl.appendChild(b);
+}
+function pickWriter(btn) {
+  currentWriter = btn.dataset.writer;
+  document.querySelectorAll(".writers button").forEach(x => x.classList.remove("sel"));
+  btn.classList.add("sel");
+}
+
+function collectInfoText() {
+  if (samples.length === 0) return "Noch keine Bilder gespeichert.";
+  const perLabel = new Array(10).fill(0);
+  const perWriter = {};
+  for (const s of samples) {
+    perLabel[s.label]++;
+    perWriter[s.writer] = (perWriter[s.writer] || 0) + 1;
+  }
+  return "Gespeichert: <b>" + samples.length + "</b> Bilder · " +
+    Object.entries(perWriter).map(([w, n]) => w + ": " + n).join(", ") +
+    "<br>Pro Ziffer: " + perLabel.join(" · ") +
+    "<br>Tipp: 8–10 Bilder pro Ziffer und Kind ergeben schon ein schönes Modell.";
+}
+
+function saveSample() {
+  const px = preprocess();
+  if (!px) { alert("Erst eine Zahl schreiben!"); return; }
+  samples.push({
+    label: currentLabel,
+    writer: currentWriter,
+    pixels: Array.from(px, v => Math.round(v * 1000) / 1000)
+  });
+  document.getElementById("collectInfo").innerHTML = collectInfoText();
+  clearCanvas();
+}
+function undoSample() {
+  if (samples.length === 0) return;
+  const s = samples.pop();
+  document.getElementById("collectInfo").innerHTML =
+    "Letztes Bild zurückgenommen (Ziffer " + s.label + ", " + s.writer + ").<br>" + collectInfoText();
+}
+function exportData() {
+  if (samples.length === 0) { alert("Noch nichts zum Exportieren – erst Bilder speichern!"); return; }
+  const payload = { format: "handschrift-daten-v1", samples };
+  const json = JSON.stringify(payload);
+  // 1. Versuch: normaler Download (funktioniert in Safari & echten Browsern)
+  const blob = new Blob([json], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "handschrift-daten.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+  // 2. Fallback für eingebettete Ansichten (z. B. Koder): Text zum Kopieren anzeigen
+  document.getElementById("exportText").value = json;
+  document.getElementById("exportStatus").textContent =
+    "Download gestartet. Falls keine Datei erschien: unten kopieren und selbst als handschrift-daten.json speichern.";
+  document.getElementById("exportOverlay").style.display = "flex";
+}
+function closeExportOverlay() {
+  document.getElementById("exportOverlay").style.display = "none";
+}
+function copyExport() {
+  const el = document.getElementById("exportText");
+  el.focus();
+  el.select();
+  if (el.setSelectionRange) el.setSelectionRange(0, el.value.length);
+  let ok = false;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(el.value).then(() => {
+      document.getElementById("exportStatus").textContent =
+        "✅ Kopiert! Neue Datei anlegen (z. B. in Koder oder Dateien), einfügen und als handschrift-daten.json speichern.";
+    }).catch(() => {
+      document.getElementById("exportStatus").textContent =
+        "Automatisches Kopieren nicht erlaubt – bitte den Text oben manuell markieren und kopieren.";
+    });
+    return;
+  }
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  document.getElementById("exportStatus").textContent = ok
+    ? "✅ Kopiert! Neue Datei anlegen (z. B. in Koder oder Dateien), einfügen und als handschrift-daten.json speichern."
+    : "Bitte den Text oben manuell markieren und kopieren.";
+}
+
+// ---------- Intro-Folien ----------
+const intro = document.getElementById("intro");
+const introSlides = intro.querySelectorAll(".slide");
+let slideIdx = 0;
+const dotsEl = document.getElementById("introDots");
+introSlides.forEach((_, i) => {
+  const d = document.createElement("div");
+  d.className = "dot" + (i === 0 ? " on" : "");
+  dotsEl.appendChild(d);
+});
+function showSlide(i) {
+  slideIdx = Math.max(0, Math.min(introSlides.length - 1, i));
+  introSlides.forEach((s, j) => s.classList.toggle("active", j === slideIdx));
+  dotsEl.querySelectorAll(".dot").forEach((d, j) => d.classList.toggle("on", j === slideIdx));
+  document.getElementById("introNext").textContent =
+    slideIdx === introSlides.length - 1 ? "Los geht’s! 🚀" : "Weiter →";
+}
+function closeIntro() {
+  intro.style.display = "none";
+}
+document.getElementById("introNext").onclick = () => {
+  if (slideIdx === introSlides.length - 1) closeIntro();
+  else showSlide(slideIdx + 1);
+};
+document.getElementById("introBack").onclick = () => showSlide(slideIdx - 1);
+document.getElementById("introBtn").onclick = () => {
+  intro.style.display = "flex";
+  showSlide(0);
+};
+// Wischen auf dem iPad
+let touchX = null;
+intro.addEventListener("touchstart", (e) => { touchX = e.changedTouches[0].clientX; }, { passive: true });
+intro.addEventListener("touchend", (e) => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX;
+  if (dx < -50) {
+    if (slideIdx === introSlides.length - 1) closeIntro();
+    else showSlide(slideIdx + 1);
+  } else if (dx > 50) {
+    showSlide(slideIdx - 1);
+  }
+  touchX = null;
+}, { passive: true });
+showSlide(0);
+</script>
+</body>
+</html>
