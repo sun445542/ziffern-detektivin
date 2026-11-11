@@ -101,6 +101,8 @@
     margin-top: 10px; text-align: center; font-size: 13px; color: #94a3b8;
     padding: 8px 10px; background: #0f172a; border-radius: 10px;
   }
+  .modelloaders { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: min(900px, 96vw); margin: 0 auto 12px; }
+  .modelloaders .status { flex: 1; min-width: 260px; margin: 0; }
   .labels { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; margin: 6px 0 10px; }
   .labels button {
     border: none; border-radius: 10px; padding: 10px 0; font-size: 18px; font-weight: 700;
@@ -226,8 +228,15 @@
   <p>Datenwissenschaftlerin = Detektivin &amp; Lehrerin für Computer · <a id="introBtn" style="color:#f472b6;cursor:pointer;text-decoration:underline">ℹ️ Über mich</a> · <a id="intro2Btn" style="color:#38bdf8;cursor:pointer;text-decoration:underline">📈 Mehr Daten</a></p>
 </header>
 
+<div class="modelloaders">
+  <div class="status" id="wenigModelStatus"></div>
+  <div class="status" id="modelStatus"></div>
+  <div class="status" id="writerModelStatus"></div>
+</div>
+
 <div class="tabs">
-  <button class="tab active" id="tabErkennen" onclick="setMode('erkennen')">🔍 Erkennen</button>
+  <button class="tab" id="tabWenig" onclick="setMode('wenig')">🐢 Wenig geübt</button>
+  <button class="tab active" id="tabErkennen" onclick="setMode('erkennen')">🔍 Viel geübt</button>
   <button class="tab" id="tabSchreiber" onclick="setMode('schreiber')">🕵️ Schreiber</button>
   <button class="tab" id="tabSammeln" onclick="setMode('sammeln')">✏️ Sammeln</button>
 </div>
@@ -243,13 +252,21 @@
 
   <div class="card side-card">
     <div class="resultbox" id="resultArea">
-      <h3>🤖 Was sagt der Computer?</h3>
-      <div class="status" id="modelStatus"></div>
+      <h3>🤖 Viel geübt – was sagt der Computer?</h3>
       <div class="result">
         <div class="bigdigit" id="bigDigit">7</div>
         <div class="resulttext" id="resultText">Schreib eine Zahl und drück „Erkennen!“</div>
       </div>
       <div class="bars" id="bars"></div>
+    </div>
+
+    <div class="resultbox hidden" id="wenigArea">
+      <h3>🐢 Wenig geübt – was sagt der Computer?</h3>
+      <div class="result">
+        <div class="bigdigit" id="bigWenigDigit">7</div>
+        <div class="resulttext" id="wenigText">Schreib eine Zahl – dieses Modell hat nur wenige Beispiele gesehen!</div>
+      </div>
+      <div class="bars" id="wenigBars"></div>
     </div>
 
     <div id="collectArea" class="hidden">
@@ -268,12 +285,15 @@
     </div>
 
     <div id="writerArea" class="hidden">
-      <h3>🕵️ Wer hat das geschrieben?</h3>
-      <div class="status" id="writerModelStatus"></div>
+      <h3>🤖 Ziffer &amp; Schreiber gleichzeitig erkennen</h3>
       <div class="result">
-        <div class="resulttext" id="writerText">Schreib eine Zahl – und ich rate, wer sie geschrieben hat!</div>
+        <div class="bigdigit" id="writerBigDigit">7</div>
+        <div class="resulttext" id="writerText">Schreib eine Zahl – ich rate die Ziffer UND wer sie geschrieben hat!</div>
       </div>
+      <p class="collectinfo" style="margin:10px 0 2px; text-align:left">🕵️ Wer hat geschrieben?</p>
       <div class="bars" id="writerBars"></div>
+      <p class="collectinfo" style="margin:10px 0 2px; text-align:left">🔢 Welche Ziffer ist es?</p>
+      <div class="bars" id="writerDigitBars"></div>
     </div>
 
     <div class="previewbox">
@@ -559,7 +579,7 @@ let model = placeholderModel();
 
 function updateModelStatus() {
   document.getElementById("modelStatus").innerHTML =
-    "🤖 Modell: <b>" + model.name + "</b> &nbsp;·&nbsp; " +
+    "🤖 Modell (viel geübt): <b>" + model.name + "</b> &nbsp;·&nbsp; " +
     "<label style='cursor:pointer;text-decoration:underline'>" +
     "<input type='file' accept='.json,application/json' onchange='loadModelFile(this)'>Modell laden (ziffern_model.json)</label>" +
     "<br>Trainiert du erst später? Dann rätst das Platzhalter-Modell nur – die Vorschau unten funktioniert trotzdem.";
@@ -577,6 +597,40 @@ function loadModelFile(input) {
       model = { name: obj.name || "geladenes Modell", layers: obj.layers };
       updateModelStatus();
       alert("Modell „" + model.name + "“ geladen! ✅");
+    } catch (err) {
+      alert("Das konnte ich nicht laden: " + err.message);
+    }
+    input.value = "";
+  };
+  reader.readAsText(f);
+}
+
+// ---------- Wenig-geübt-Modell (Ziffern mit wenigen Trainingsdaten) ----------
+let wenigModel = {
+  name: "Platzhalter (untrainiert – nur zum Ausprobieren)",
+  layers: placeholderModel().layers,
+};
+
+function updateWenigModelStatus() {
+  document.getElementById("wenigModelStatus").innerHTML =
+    "🐢 Modell (wenig geübt): <b>" + wenigModel.name + "</b> &nbsp;·&nbsp; " +
+    "<label style='cursor:pointer;text-decoration:underline'>" +
+    "<input type='file' accept='.json,application/json' onchange='loadWenigModelFile(this)'>Modell laden (ziffern_model_wenig.json)</label>" +
+    "<br>Hier ein Modell laden, das mit <b>wenig Daten</b> trainiert wurde.";
+}
+updateWenigModelStatus();
+
+function loadWenigModelFile(input) {
+  const f = input.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const obj = JSON.parse(reader.result);
+      if (!Array.isArray(obj.layers) || obj.layers.length === 0) throw new Error("Keine Layers gefunden");
+      wenigModel = { name: obj.name || "geladenes Wenig-Modell", layers: obj.layers };
+      updateWenigModelStatus();
+      alert("Modell „" + wenigModel.name + "“ geladen! ✅");
     } catch (err) {
       alert("Das konnte ich nicht laden: " + err.message);
     }
@@ -612,7 +666,8 @@ function updateWriterModelStatus() {
   document.getElementById("writerModelStatus").innerHTML =
     "🧑‍🎓 Schreiber-Modell: <b>" + writerModel.name + "</b> &nbsp;·&nbsp; " +
     "<label style='cursor:pointer;text-decoration:underline'>" +
-    "<input type='file' accept='.json,application/json' onchange='loadWriterModelFile(this)'>Modell laden (schreiber_model.json)</label>";
+    "<input type='file' accept='.json,application/json' onchange='loadWriterModelFile(this)'>Modell laden (schreiber_model.json)</label>" +
+    "<br>Tippen und <b>schreiber_model.json</b> auswählen.";
 }
 updateWriterModelStatus();
 
@@ -654,6 +709,20 @@ function buildWriterBars() {
 }
 buildWriterBars();
 
+// Balken für die Ziffern 0–9 im Schreiber-Tab (unter den Schreiber-Balken)
+const writerDigitBarsEl = document.getElementById("writerDigitBars");
+const writerDigitFills = [];
+for (let d = 0; d < 10; d++) {
+  const row = document.createElement("div");
+  row.className = "barrow";
+  row.innerHTML =
+    "<div class='barlabel'>" + d + "</div>" +
+    "<div class='bartrack'><div class='barfill' id='dbar" + d + "'></div></div>" +
+    "<div class='barpct' id='dpct" + d + "'>0 %</div>";
+  writerDigitBarsEl.appendChild(row);
+  writerDigitFills.push(document.getElementById("dbar" + d));
+}
+
 function rateSchreiber() {
   const px = preprocess();
   if (!px) {
@@ -661,21 +730,57 @@ function rateSchreiber() {
     return;
   }
   renderPreview(px);
-  const probs = forward(writerModel, px);
-  let best = 0;
-  for (let i = 1; i < probs.length; i++) if (probs[i] > probs[best]) best = i;
-  const conf = probs[best];
+
+  // --- Ziffer mit dem Ziffern-Modell erkennen ---
+  const dprobs = forward(model, px);
+  let besteZiffer = 0;
+  for (let d = 1; d < dprobs.length; d++) if (dprobs[d] > dprobs[besteZiffer]) besteZiffer = d;
+  const zifferSicher = dprobs[besteZiffer];
+
+  // --- Schreiber mit dem Schreiber-Modell raten ---
+  const wprobs = forward(writerModel, px);
+  let besterSchreiber = 0;
+  for (let i = 1; i < wprobs.length; i++) if (wprobs[i] > wprobs[besterSchreiber]) besterSchreiber = i;
+  const schreiberSicher = wprobs[besterSchreiber];
+
   for (let i = 0; i < writerBars.length; i++) {
-    writerBars[i].style.width = (probs[i] * 100).toFixed(1) + "%";
-    writerBars[i].classList.toggle("top", i === best);
-    document.getElementById("wpct" + i).textContent = (probs[i] * 100).toFixed(0) + " %";
+    writerBars[i].style.width = (wprobs[i] * 100).toFixed(1) + "%";
+    writerBars[i].classList.toggle("top", i === besterSchreiber);
+    document.getElementById("wpct" + i).textContent = (wprobs[i] * 100).toFixed(0) + " %";
   }
-  const wer = writerModel.classes[best];
-  let text;
-  if (conf > 0.7) text = "Ich bin mir <b>sicher</b>: Das hat <b>" + wer + "</b> geschrieben! 🎉 (" + (conf * 100).toFixed(0) + " % sicher)";
-  else if (conf > 0.55) text = "Ich glaube, das war <b>" + wer + "</b>. (" + (conf * 100).toFixed(0) + " % sicher)";
-  else text = "Schwerer Fall! 🤔 Vielleicht <b>" + wer + "</b>? (" + (conf * 100).toFixed(0) + " % sicher)";
-  document.getElementById("writerText").innerHTML = text;
+
+  const wer = writerModel.classes[besterSchreiber];
+  const big = document.getElementById("writerBigDigit");
+  const pct = (x) => (x * 100).toFixed(0);
+
+  let zifferTeil;
+  if (dprobs.length !== 10) {
+    zifferTeil = "⚠️ Für die Ziffer bitte noch ein <b>Ziffern-Modell</b> laden!";
+    big.style.display = "none";
+    for (let d = 0; d < 10; d++) {
+      writerDigitFills[d].style.width = "0%";
+      writerDigitFills[d].classList.remove("top");
+      document.getElementById("dpct" + d).textContent = "0 %";
+    }
+  } else {
+    big.style.display = "block";
+    big.textContent = besteZiffer;
+    for (let d = 0; d < 10; d++) {
+      writerDigitFills[d].style.width = (dprobs[d] * 100).toFixed(1) + "%";
+      writerDigitFills[d].classList.toggle("top", d === besteZiffer);
+      document.getElementById("dpct" + d).textContent = (dprobs[d] * 100).toFixed(0) + " %";
+    }
+    if (zifferSicher > 0.7) zifferTeil = "Das ist eine <b>" + besteZiffer + "</b>! 🎉 (" + pct(zifferSicher) + " % sicher)";
+    else if (zifferSicher > 0.4) zifferTeil = "Ich glaube, das ist eine <b>" + besteZiffer + "</b>. (" + pct(zifferSicher) + " % sicher)";
+    else zifferTeil = "Hm … bei der Ziffer bin ich unsicher 🤔 Vielleicht eine " + besteZiffer + "? (" + pct(zifferSicher) + " % sicher)";
+  }
+
+  let schreiberTeil;
+  if (schreiberSicher > 0.7) schreiberTeil = "Und geschrieben hat sie <b>" + wer + "</b>! 🕵️ (" + pct(schreiberSicher) + " % sicher)";
+  else if (schreiberSicher > 0.55) schreiberTeil = "Ich glaube, <b>" + wer + "</b> hat sie geschrieben. (" + pct(schreiberSicher) + " % sicher)";
+  else schreiberTeil = "Schwerer Fall! 🤔 Vielleicht <b>" + wer + "</b>? (" + pct(schreiberSicher) + " % sicher)";
+
+  document.getElementById("writerText").innerHTML = zifferTeil + "<br>" + schreiberTeil;
 }
 
 // ---------- UI: Modi, Balken, Ergebnis ----------
@@ -683,16 +788,19 @@ let mode = "erkennen";
 function setMode(m) {
   mode = m;
   document.getElementById("tabErkennen").classList.toggle("active", m === "erkennen");
+  document.getElementById("tabWenig").classList.toggle("active", m === "wenig");
   document.getElementById("tabSchreiber").classList.toggle("active", m === "schreiber");
   document.getElementById("tabSammeln").classList.toggle("active", m === "sammeln");
   document.getElementById("resultArea").classList.toggle("hidden", m !== "erkennen");
+  document.getElementById("wenigArea").classList.toggle("hidden", m !== "wenig");
   document.getElementById("collectArea").classList.toggle("hidden", m !== "sammeln");
   document.getElementById("writerArea").classList.toggle("hidden", m !== "schreiber");
   document.getElementById("mainBtn").textContent =
-    m === "erkennen" ? "🔍 Erkennen!" : m === "schreiber" ? "🕵️ Raten!" : "💾 Speichern";
+    m === "erkennen" ? "🔍 Erkennen!" : m === "wenig" ? "🐢 Erkennen!" : m === "schreiber" ? "🕵️ Beides erkennen!" : "💾 Speichern";
 }
 function mainAction() {
   if (mode === "erkennen") erkennen();
+  else if (mode === "wenig") erkennenWenig();
   else if (mode === "schreiber") rateSchreiber();
   else saveSample();
 }
@@ -709,6 +817,20 @@ for (let d = 0; d < 10; d++) {
     "<div class='barpct' id='pct" + d + "'>0 %</div>";
   barsEl.appendChild(row);
   barFills.push(document.getElementById("bar" + d));
+}
+
+// Balken für 0–9 im „Wenig geübt“-Tab
+const wenigBarsEl = document.getElementById("wenigBars");
+const wenigFills = [];
+for (let d = 0; d < 10; d++) {
+  const row = document.createElement("div");
+  row.className = "barrow";
+  row.innerHTML =
+    "<div class='barlabel'>" + d + "</div>" +
+    "<div class='bartrack'><div class='barfill' id='lbar" + d + "'></div></div>" +
+    "<div class='barpct' id='lpct" + d + "'>0 %</div>";
+  wenigBarsEl.appendChild(row);
+  wenigFills.push(document.getElementById("lbar" + d));
 }
 
 function erkennen() {
@@ -740,6 +862,37 @@ function erkennen() {
   else if (conf > 0.4) text = "Ich glaube, das ist eine <b>" + best + "</b>. (" + (conf * 100).toFixed(0) + " % sicher)";
   else text = "Hm … da bin ich mir <b>unsicher</b> 🤔 Vielleicht eine " + best + "? (" + (conf * 100).toFixed(0) + " % sicher)";
   document.getElementById("resultText").innerHTML = text;
+}
+
+function erkennenWenig() {
+  const px = preprocess();
+  if (!px) {
+    document.getElementById("wenigText").textContent = "Erst eine Zahl schreiben! ✏️";
+    return;
+  }
+  renderPreview(px);
+  const probs = forward(wenigModel, px);
+  if (probs.length !== 10) {
+    document.getElementById("wenigText").innerHTML =
+      "⚠️ Das geladene Modell erkennt keine Ziffern 0–9 – bitte ein Ziffern-Modell laden.";
+    return;
+  }
+  let best = 0;
+  for (let d = 1; d < 10; d++) if (probs[d] > probs[best]) best = d;
+  const conf = probs[best];
+  for (let d = 0; d < 10; d++) {
+    wenigFills[d].style.width = (probs[d] * 100).toFixed(1) + "%";
+    wenigFills[d].classList.toggle("top", d === best);
+    document.getElementById("lpct" + d).textContent = (probs[d] * 100).toFixed(0) + " %";
+  }
+  const big = document.getElementById("bigWenigDigit");
+  big.style.display = "block";
+  big.textContent = best;
+  let text;
+  if (conf > 0.7) text = "Ich bin mir <b>sicher</b>: Das ist eine <b>" + best + "</b>! 🎉 (" + (conf * 100).toFixed(0) + " % sicher)";
+  else if (conf > 0.4) text = "Ich glaube, das ist eine <b>" + best + "</b>. (" + (conf * 100).toFixed(0) + " % sicher)";
+  else text = "Hm … da bin ich mir <b>unsicher</b> 🤔 Vielleicht eine " + best + "? (" + (conf * 100).toFixed(0) + " % sicher)";
+  document.getElementById("wenigText").innerHTML = text;
 }
 
 // ---------- Sammel-Modus ----------
