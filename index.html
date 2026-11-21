@@ -101,7 +101,7 @@
     margin-top: 10px; text-align: center; font-size: 13px; color: #94a3b8;
     padding: 8px 10px; background: #0f172a; border-radius: 10px;
   }
-  .modelloaders { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: min(900px, 96vw); margin: 0 auto 12px; }
+  .modelloaders { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: min(900px, 96vw); margin: 12px auto 0; }
   .modelloaders .status { flex: 1; min-width: 260px; margin: 0; }
   .labels { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; margin: 6px 0 10px; }
   .labels button {
@@ -199,12 +199,6 @@
   <p>Datenwissenschaftlerin = Detektivin &amp; Lehrerin für Computer · <a id="introBtn" style="color:#f472b6;cursor:pointer;text-decoration:underline">ℹ️ Über mich</a> · <a id="intro2Btn" style="color:#38bdf8;cursor:pointer;text-decoration:underline">📈 Mehr Daten</a></p>
 </header>
 
-<div class="modelloaders">
-  <div class="status" id="wenigModelStatus"></div>
-  <div class="status" id="modelStatus"></div>
-  <div class="status" id="writerModelStatus"></div>
-</div>
-
 <div class="tabs">
   <button class="tab" id="tabWenig" onclick="setMode('wenig')">🐢 Wenig geübt</button>
   <button class="tab active" id="tabErkennen" onclick="setMode('erkennen')">🔍 Viel geübt</button>
@@ -289,6 +283,12 @@
     </div>
     <div class="status" id="exportStatus">Der Download-Versuch wurde gestartet – falls nichts passierte, bitte den Text oben kopieren.</div>
   </div>
+</div>
+
+<div class="modelloaders">
+  <div class="status" id="wenigModelStatus"></div>
+  <div class="status" id="modelStatus"></div>
+  <div class="status" id="writerModelStatus"></div>
 </div>
 
 <script>
